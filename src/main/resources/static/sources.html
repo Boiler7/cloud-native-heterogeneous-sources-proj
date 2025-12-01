@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sources - Data Integration Platform</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="dashboard-header">
+            <div class="header-content">
+                <h1>Sources</h1>
+                <div class="user-info">
+                    <button id="logoutBtn" class="btn btn-secondary btn-sm">Logout</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav-tabs">
+            <a href="/dashboard" class="nav-tab">🏠 Dashboard</a>
+            <a href="/sources" class="nav-tab active">📁 Sources</a>
+            <a href="/destinations" class="nav-tab">🎯 Destinations</a>
+            <a href="/connections" class="nav-tab">🔗 Connections</a>
+        </div>
+
+        <div class="table-container">
+            <div class="table-header">
+                <h2>Registered Sources</h2>
+                <div class="table-actions">
+                    <button id="refreshBtn" class="btn btn-secondary btn-sm">↻ Refresh</button>
+                    <button id="addSourceBtn" class="btn btn-primary btn-sm">+ Add Source</button>
+                </div>
+            </div>
+
+            <div id="sourcesTable">
+                <div class="skeleton-table-row skeleton"></div>
+                <div class="skeleton-table-row skeleton"></div>
+                <div class="skeleton-table-row skeleton"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="addSourceModal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Create Source</h2>
+                <button class="modal-close" onclick="closeAddSourceModal()">×</button>
+            </div>
+            <form id="addSourceForm">
+                <div class="modal-body">
+                    <input type="hidden" id="sourceRole" value="SOURCE">
+                    <div class="form-group">
+                        <label for="sourceName">Name *</label>
+                        <input type="text" id="sourceName" required placeholder="e.g., CRM Database">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sourceType">Type *</label>
+                        <select id="sourceType" required>
+                            <option value="">Select type...</option>
+                            <option value="DB">Database</option>
+                            <option value="CSV">CSV File</option>
+                            <option value="JSON">JSON File</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="dbConfigSection" style="display: none;">
+                        <label>Database Configuration</label>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label for="dbHost">Host *</label>
+                                <input type="text" id="dbHost" placeholder="db.internal">
+                            </div>
+                            <div class="config-field">
+                                <label for="dbPort">Port *</label>
+                                <input type="number" id="dbPort" value="5432" min="1">
+                            </div>
+                            <div class="config-field">
+                                <label for="dbName">Database *</label>
+                                <input type="text" id="dbName" placeholder="warehouse">
+                            </div>
+                            <div class="config-field">
+                                <label for="dbUser">Username *</label>
+                                <input type="text" id="dbUser" placeholder="ingest_bot">
+                            </div>
+                            <div class="config-field">
+                                <label for="dbPassword">Password *</label>
+                                <input type="password" id="dbPassword" placeholder="••••••">
+                            </div>
+                        </div>
+                        <button type="button" id="testDbConnection" class="btn btn-secondary btn-sm" style="margin-top: 0.5rem;">Test Connection</button>
+                        <div id="dbTestResult" class="field-hint"></div>
+                    </div>
+
+                    <div class="form-group" id="fileConfigSection" style="display: none;">
+                        <label>File Upload</label>
+                        <div id="fileDropzone" class="dropzone" tabindex="0">
+                            <span class="dropzone-icon">📁</span>
+                            <div class="dropzone-text">
+                                <strong>Drop your file here</strong>
+                                <span>or click to browse</span>
+                            </div>
+                        </div>
+                        <input type="file" id="fileInput" accept=".csv,.json" style="display: none;">
+                        <div id="fileName" class="file-name"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="additionalConfig">Additional Configuration (JSON)</label>
+                        <textarea id="additionalConfig" rows="4" placeholder='{"dedupeKeys":["id"]}'></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddSourceModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Source</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="statusModal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Ingestion Status</h2>
+                <button class="modal-close" onclick="closeStatusModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="statusContent">
+                    <div class="skeleton-text skeleton"></div>
+                    <div class="skeleton-text skeleton"></div>
+                    <div class="skeleton-text skeleton"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeStatusModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/toast.js"></script>
+    <script src="/js/sources.js"></script>
+</body>
+</html>
