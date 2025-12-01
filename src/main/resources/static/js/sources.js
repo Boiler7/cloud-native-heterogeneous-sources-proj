@@ -2,6 +2,8 @@ if (!requireAuth()) {
     throw new Error('Not authenticated');
 }
 
+updateWelcomeMessage();
+
 const SOURCES_API_BASE = '/api/sources';
 
 let currentSources = [];
@@ -9,9 +11,22 @@ let selectedFile = null;
 let uploadedMetadata = null;
 let statusPolling = null;
 
+const tableSelectionState = {
+    modal: document.getElementById('tableSelectionModal'),
+    listEl: document.getElementById('tableSelectionList'),
+    hintEl: document.getElementById('tableSelectionHint'),
+    currentSource: null,
+    schemaData: [],
+    selectedTables: new Set(),
+    loading: false,
+    error: null
+};
+
 const sourceTypeSelect = document.getElementById('sourceType');
 const dbConfigSection = document.getElementById('dbConfigSection');
 const fileConfigSection = document.getElementById('fileConfigSection');
+const csvDelimiterSection = document.getElementById('csvDelimiterSection');
+const csvDelimiterInput = document.getElementById('csvDelimiter');
 const dropzone = document.getElementById('fileDropzone');
 const fileInput = document.getElementById('fileInput');
 const fileNameLabel = document.getElementById('fileName');
@@ -99,17 +114,35 @@ function setupEventListeners() {
             }
         });
     }
+
+    const skipTables = document.getElementById('skipTableSelection');
+    const closeTables = document.getElementById('closeTableSelection');
+    const saveTables = document.getElementById('saveTableSelection');
+    [skipTables, closeTables].forEach(btn => {
+        if (btn) {
+            btn.addEventListener('click', closeTableSelectionModal);
+        }
+    });
+    if (saveTables) {
+        saveTables.addEventListener('click', saveTableSelection);
+    }
 }
 
 function handleTypeChange(event) {
     const value = event.target.value;
     dbConfigSection.style.display = value === 'DB' ? 'block' : 'none';
-    fileConfigSection.style.display = value === 'CSV' || value === 'JSON' ? 'block' : 'none';
+    fileConfigSection.style.display = value === 'CSV' ? 'block' : 'none';
+    if (csvDelimiterSection) {
+        csvDelimiterSection.style.display = value === 'CSV' ? 'block' : 'none';
+    }
 }
 
 function resetConfigSections() {
     dbConfigSection.style.display = 'none';
     fileConfigSection.style.display = 'none';
+    if (csvDelimiterSection) {
+        csvDelimiterSection.style.display = 'none';
+    }
 }
 
 function setSelectedFile(file) {
@@ -126,7 +159,6 @@ async function handleCreateSource(event) {
     const name = document.getElementById('sourceName').value.trim();
     const type = document.getElementById('sourceType').value;
     const role = document.getElementById('sourceRole').value || 'SOURCE';
-    const additionalConfigText = document.getElementById('additionalConfig').value.trim();
 
     if (!name) {
         toast.error('Source name is required');
@@ -137,21 +169,11 @@ async function handleCreateSource(event) {
         return;
     }
 
-    let additionalConfig = {};
-    if (additionalConfigText) {
-        try {
-            additionalConfig = JSON.parse(additionalConfigText);
-        } catch (error) {
-            toast.error('Invalid JSON in additional configuration');
-            return;
-        }
-    }
-
     let config = {};
     try {
         if (type === 'DB') {
             config = buildDatabaseConfig();
-        } else if (type === 'CSV' || type === 'JSON') {
+        } else if (type === 'CSV') {
             const fileConfig = await ensureFileUploaded(type, name);
             config = { ...fileConfig };
         }
@@ -160,14 +182,12 @@ async function handleCreateSource(event) {
         return;
     }
 
-    config = { ...config, ...additionalConfig };
-
     const submitBtn = event.target.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner"></span> Creating...';
 
     try {
-        await api.post(SOURCES_API_BASE, {
+        const created = await api.post(SOURCES_API_BASE, {
             name,
             type,
             role,
@@ -175,12 +195,200 @@ async function handleCreateSource(event) {
         });
         toast.success('Source created successfully');
         closeAddSourceModal();
-        loadSources();
+        await loadSources();
+        openTableSelectionModal(created);
     } catch (error) {
         toast.error(error.message || 'Failed to create source');
     } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Create Source';
+    }
+}
+
+function openTableSelectionModal(source) {
+    if (!tableSelectionState.modal || !source || source.type !== 'DB') {
+        return;
+    }
+    tableSelectionState.currentSource = source;
+    tableSelectionState.loading = true;
+    tableSelectionState.error = null;
+    tableSelectionState.schemaData = [];
+    tableSelectionState.selectedTables = new Set();
+    if (tableSelectionState.hintEl) {
+        tableSelectionState.hintEl.textContent = 'Loading tables…';
+    }
+    renderTableSelectionList();
+    tableSelectionState.modal.style.display = 'flex';
+    fetchTablesForSource(source.id);
+}
+
+function closeTableSelectionModal() {
+    if (tableSelectionState.modal) {
+        tableSelectionState.modal.style.display = 'none';
+    }
+    tableSelectionState.currentSource = null;
+}
+
+async function fetchTablesForSource(sourceId) {
+    tableSelectionState.loading = true;
+    tableSelectionState.error = null;
+    renderTableSelectionList();
+    try {
+        const tables = await api.get(`${SOURCES_API_BASE}/${sourceId}/schema`);
+        tableSelectionState.schemaData = groupTablesBySchema(tables || []);
+        tableSelectionState.selectedTables = preselectAllTables(tableSelectionState.schemaData);
+    } catch (error) {
+        tableSelectionState.error = error.message || 'Failed to load tables';
+    } finally {
+        tableSelectionState.loading = false;
+        renderTableSelectionList();
+    }
+}
+
+function groupTablesBySchema(tables) {
+    const grouped = new Map();
+    tables.forEach(entry => {
+        const schema = entry.schema || '(default)';
+        if (!grouped.has(schema)) {
+            grouped.set(schema, []);
+        }
+        grouped.get(schema).push(entry.tableName);
+    });
+    return Array.from(grouped.entries()).map(([schema, tableNames]) => ({ schema, tables: tableNames.sort() }));
+}
+
+function preselectAllTables(schemaData) {
+    const selected = new Set();
+    schemaData.forEach(group => {
+        group.tables.forEach(table => selected.add(buildTableKey(group.schema, table)));
+    });
+    return selected;
+}
+
+function buildTableKey(schema, table) {
+    return `${schema || ''}|${table}`;
+}
+
+function renderTableSelectionList() {
+    const container = tableSelectionState.listEl;
+    if (!container) {
+        return;
+    }
+    container.innerHTML = '';
+    if (tableSelectionState.loading) {
+        container.innerHTML = '<div class="state-message">Loading tables…</div>';
+        return;
+    }
+    if (tableSelectionState.error) {
+        container.innerHTML = `<div class="state-message error-box">${tableSelectionState.error}</div>`;
+        if (tableSelectionState.hintEl) {
+            tableSelectionState.hintEl.textContent = 'Unable to load tables for this source.';
+        }
+        return;
+    }
+    if (!tableSelectionState.schemaData.length) {
+        container.innerHTML = '<div class="state-message">No tables found.</div>';
+        if (tableSelectionState.hintEl) {
+            tableSelectionState.hintEl.textContent = 'No tables available to select.';
+        }
+        return;
+    }
+
+    tableSelectionState.schemaData.forEach((group, idx) => {
+        const groupEl = document.createElement('div');
+        groupEl.className = 'schema-group';
+
+        const header = document.createElement('div');
+        header.className = 'schema-header';
+        const schemaId = `schema-${idx}`;
+        const schemaLabel = document.createElement('label');
+        schemaLabel.setAttribute('for', schemaId);
+        schemaLabel.textContent = group.schema;
+        const schemaCheckbox = document.createElement('input');
+        schemaCheckbox.type = 'checkbox';
+        schemaCheckbox.id = schemaId;
+        const allSelected = group.tables.every(t => tableSelectionState.selectedTables.has(buildTableKey(group.schema, t)));
+        schemaCheckbox.checked = allSelected;
+        schemaCheckbox.addEventListener('change', (event) => toggleSchemaSelection(group, event.target.checked));
+        header.appendChild(schemaLabel);
+        header.appendChild(schemaCheckbox);
+        groupEl.appendChild(header);
+
+        const tableList = document.createElement('div');
+        tableList.className = 'table-list';
+        group.tables.forEach((tableName, tableIdx) => {
+            const row = document.createElement('label');
+            row.className = 'table-row';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `table-${idx}-${tableIdx}`;
+            checkbox.checked = tableSelectionState.selectedTables.has(buildTableKey(group.schema, tableName));
+            checkbox.addEventListener('change', (event) => toggleTableSelection(group.schema, tableName, event.target.checked));
+            const text = document.createElement('span');
+            text.textContent = tableName;
+            row.appendChild(checkbox);
+            row.appendChild(text);
+            tableList.appendChild(row);
+        });
+        groupEl.appendChild(tableList);
+        container.appendChild(groupEl);
+    });
+
+    if (tableSelectionState.hintEl) {
+        const total = tableSelectionState.selectedTables.size;
+        tableSelectionState.hintEl.textContent = `${total} table${total === 1 ? '' : 's'} selected`;
+    }
+}
+
+function toggleSchemaSelection(group, checked) {
+    group.tables.forEach(table => {
+        const key = buildTableKey(group.schema, table);
+        if (checked) {
+            tableSelectionState.selectedTables.add(key);
+        } else {
+            tableSelectionState.selectedTables.delete(key);
+        }
+    });
+    renderTableSelectionList();
+}
+
+function toggleTableSelection(schema, table, checked) {
+    const key = buildTableKey(schema, table);
+    if (checked) {
+        tableSelectionState.selectedTables.add(key);
+    } else {
+        tableSelectionState.selectedTables.delete(key);
+    }
+    renderTableSelectionList();
+}
+
+async function saveTableSelection() {
+    if (!tableSelectionState.currentSource) {
+        closeTableSelectionModal();
+        return;
+    }
+    const tables = Array.from(tableSelectionState.selectedTables).map(key => {
+        const [schema, table] = key.split('|');
+        const payload = { table };
+        if (schema) {
+            payload.schema = schema;
+            payload.alias = `${schema}.${table}`;
+        } else {
+            payload.alias = table;
+        }
+        return payload;
+    });
+
+    const baseConfig = tableSelectionState.currentSource.config ? { ...tableSelectionState.currentSource.config } : {};
+    baseConfig.tables = tables;
+
+    try {
+        await api.put(`${SOURCES_API_BASE}/${tableSelectionState.currentSource.id}`, { config: baseConfig });
+        toast.success('Table selection saved');
+        closeTableSelectionModal();
+        await loadSources();
+    } catch (error) {
+        toast.error(error.message || 'Failed to save selection');
     }
 }
 
@@ -217,13 +425,12 @@ async function ensureFileUploaded(type, name) {
     const sourceKey = sanitizeForUpload(name || selectedFile.name);
     formData.append('sourceKey', `${sourceKey}-${Date.now()}`);
     if (type === 'CSV') {
-        formData.append('delimiter', ',');
-        formData.append('encoding', 'UTF-8');
-    } else if (type === 'JSON') {
-        formData.append('encoding', 'UTF-8');
+        const delimiter = (csvDelimiterInput?.value || ',').trim() || ',';
+        formData.append('delimiter', delimiter);
     }
+    formData.append('encoding', 'UTF-8');
 
-    const endpoint = type === 'JSON' ? '/api/upload/json' : '/api/upload/csv';
+    const endpoint = '/api/upload/csv';
     const response = await api.postMultipart(endpoint, formData);
     uploadedMetadata = response;
     toast.success('File uploaded successfully');

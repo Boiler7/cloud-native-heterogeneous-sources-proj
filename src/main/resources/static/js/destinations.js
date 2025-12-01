@@ -2,6 +2,8 @@ if (!requireAuth()) {
     throw new Error('Not authenticated');
 }
 
+updateWelcomeMessage();
+
 const DESTINATION_ROLE = 'DESTINATION';
 const SOURCES_API_BASE = '/api/sources';
 

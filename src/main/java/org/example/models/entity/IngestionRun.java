@@ -3,6 +3,7 @@ package org.example.models.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.example.models.entity.Dataset;
 import org.example.models.enums.RunStatus;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.JdbcTypeCode;

@@ -61,7 +61,11 @@ CREATE TYPE integration.data_type
 
 CREATE TYPE integration.dataset_status
     AS
-    ENUM('ACTIVE', 'PAUSED');
+    ENUM('ACTIVE', 'PAUSED', 'FINISHED');
+
+CREATE TYPE integration.transform_type
+    AS
+    ENUM('NONE', 'LOWERCASE', 'UPPERCASE', 'TRIM', 'INT', 'FLOAT');
 
 
 -- =====================================================================
@@ -80,39 +84,42 @@ CREATE TABLE IF NOT EXISTS auth."user" (
 -- INTEGRATION CORE (sources, runs, raw)
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS integration.source (
-                                                  source_id  	 		BIGSERIAL PRIMARY KEY,
-                                                  source_uid        	VARCHAR(40) UNIQUE NOT NULL,
-    user_id                    	BIGINT NOT NULL REFERENCES auth."user"(user_id) ON DELETE CASCADE,
-    name       	 		VARCHAR(60) NOT NULL,
-    type       	 		integration.source_type NOT NULL,
-    role        	 		integration.connector_role NOT NULL DEFAULT 'SOURCE',
-    config     	 		JSONB NOT NULL,
-    status     	 		integration.source_status NOT NULL DEFAULT 'ACTIVE',
-    created_at  			TIMESTAMP NOT NULL DEFAULT now(),
-    updated_at  			TIMESTAMP NOT NULL DEFAULT now()
+    source_id                     BIGSERIAL PRIMARY KEY,
+    source_uid                    VARCHAR(40) UNIQUE NOT NULL,
+    user_id                       BIGINT NOT NULL REFERENCES auth."user"(user_id) ON DELETE CASCADE,
+    dataset_id                    BIGINT     REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
+    name                          VARCHAR(60) NOT NULL,
+    type                          integration.source_type NOT NULL,
+    role                          integration.connector_role NOT NULL DEFAULT 'SOURCE',
+    config                        JSONB NOT NULL,
+    status                        integration.source_status NOT NULL DEFAULT 'ACTIVE',
+    created_at                    TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at                    TIMESTAMP NOT NULL DEFAULT now()
     );
 
 CREATE TABLE IF NOT EXISTS integration.ingestion_run (
-                                                         ingestion_id 			BIGSERIAL PRIMARY KEY,
-                                                         ingestion_uid        	VARCHAR(40) UNIQUE NOT NULL,
-    source_id    			BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
-    destination_id			BIGINT     REFERENCES integration.source(source_id) ON DELETE SET NULL,
-    run_status   			integration.run_status NOT NULL DEFAULT 'QUEUED',
-    started_at   			TIMESTAMP,
-    ended_at     			TIMESTAMP,
-    rows_read    			INT DEFAULT 0,
-    rows_stored  			INT DEFAULT 0,
-    error_message 		TEXT
+    ingestion_id                   BIGSERIAL PRIMARY KEY,
+    ingestion_uid                  VARCHAR(40) UNIQUE NOT NULL,
+    dataset_id                     BIGINT     REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
+    source_id                      BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
+    destination_id                 BIGINT     REFERENCES integration.source(source_id) ON DELETE SET NULL,
+    run_status                     integration.run_status NOT NULL DEFAULT 'QUEUED',
+    started_at                     TIMESTAMP,
+    ended_at                       TIMESTAMP,
+    rows_read                      INT DEFAULT 0,
+    rows_stored                    INT DEFAULT 0,
+    error_message                  TEXT
     );
 
 CREATE TABLE IF NOT EXISTS integration.raw_event (
-                                                     raw_event_id     		BIGSERIAL PRIMARY KEY,
-                                                     raw_event_uid        	VARCHAR(40) UNIQUE NOT NULL,
-    source_id        		BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
-    ingestion_run_id 		BIGINT     REFERENCES integration.ingestion_run(ingestion_id) ON DELETE SET NULL,
-    payload          		JSONB NOT NULL,
-    payload_hash    		TEXT,                                     -- add if you dedupe
-    created_at       		TIMESTAMP NOT NULL DEFAULT now(),
+    raw_event_id                   BIGSERIAL PRIMARY KEY,
+    raw_event_uid                  VARCHAR(40) UNIQUE NOT NULL,
+    dataset_id                     BIGINT     REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
+    source_id                      BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
+    ingestion_run_id               BIGINT     REFERENCES integration.ingestion_run(ingestion_id) ON DELETE SET NULL,
+    payload                        JSONB NOT NULL,
+    payload_hash                   TEXT,                                     -- add if you dedupe
+    created_at                     TIMESTAMP NOT NULL DEFAULT now(),
     CONSTRAINT raw_event_dedupe UNIQUE NULLS NOT DISTINCT (source_id, payload_hash)
     );
 
@@ -120,12 +127,15 @@ CREATE TABLE IF NOT EXISTS integration.raw_event (
 -- DATASETS (domain-agnostic global schema)
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS integration.dataset (
-                                                   dataset_id    		BIGSERIAL PRIMARY KEY,
-                                                   dataset_uid        	VARCHAR(40) UNIQUE NOT NULL,
-    user_id       		BIGINT NOT NULL REFERENCES auth."user"(user_id) ON DELETE CASCADE,
-    name          		VARCHAR(60) NOT NULL,
-    status        		integration.dataset_status NOT NULL DEFAULT 'ACTIVE',
-    created_at    		TIMESTAMP NOT NULL DEFAULT now()
+    dataset_id                     BIGSERIAL PRIMARY KEY,
+    dataset_uid                    VARCHAR(40) UNIQUE NOT NULL,
+    user_id                        BIGINT NOT NULL REFERENCES auth."user"(user_id) ON DELETE CASCADE,
+    name                           VARCHAR(60) NOT NULL,
+    description                    TEXT,
+    primary_record_type            TEXT,
+    status                         integration.dataset_status NOT NULL DEFAULT 'ACTIVE',
+    created_at                     TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at                     TIMESTAMP
     );
 
 CREATE TABLE IF NOT EXISTS integration.dataset_field (
@@ -141,18 +151,20 @@ CREATE TABLE IF NOT EXISTS integration.dataset_field (
     CONSTRAINT dataset_field_unique_name UNIQUE (dataset_id, name)
     );
 
+ALTER TABLE IF EXISTS integration.dataset_mapping DROP CONSTRAINT IF EXISTS dataset_mapping_uniq;
+
 CREATE TABLE IF NOT EXISTS integration.dataset_mapping (
-                                                           dataset_mapping_id 	BIGSERIAL PRIMARY KEY,
-                                                           dataset_mapping_uid   VARCHAR(40) UNIQUE NOT NULL,
-    dataset_id         	BIGINT NOT NULL REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
-    source_id          	BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
-    dataset_field_id   	BIGINT NOT NULL REFERENCES integration.dataset_field(dataset_field_id) ON DELETE CASCADE,
-    src_json_path      	TEXT   NOT NULL,
-    transform_sql      	TEXT,
-    required           	BOOLEAN NOT NULL DEFAULT FALSE,
-    priority           	INT     NOT NULL DEFAULT 0,
-    -- prevent duplicate mapping triples
-    CONSTRAINT dataset_mapping_uniq UNIQUE (dataset_id, dataset_field_id, source_id)
+    dataset_mapping_id   BIGSERIAL PRIMARY KEY,
+    dataset_mapping_uid   VARCHAR(40) UNIQUE NOT NULL,
+    dataset_id           BIGINT NOT NULL REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
+    source_id            BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
+    dataset_field_id     BIGINT NOT NULL REFERENCES integration.dataset_field(dataset_field_id) ON DELETE CASCADE,
+    src_json_path        TEXT   NOT NULL,
+    src_path             TEXT   NOT NULL DEFAULT '',
+    transform_type       integration.transform_type NOT NULL DEFAULT 'NONE',
+    transform_sql        TEXT,
+    required             BOOLEAN NOT NULL DEFAULT FALSE,
+    priority             INT     NOT NULL DEFAULT 0
     );
 
 CREATE TABLE IF NOT EXISTS integration.transform_run (
@@ -168,14 +180,15 @@ CREATE TABLE IF NOT EXISTS integration.transform_run (
     );
 
 CREATE TABLE IF NOT EXISTS integration.unified_row (
-                                                       unified_row_id 		BIGSERIAL PRIMARY KEY,
-                                                       unified_row_uid       VARCHAR(40) UNIQUE NOT NULL,
-    dataset_id     		BIGINT NOT NULL REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
-    source_id      		BIGINT     REFERENCES integration.source(source_id) ON DELETE SET NULL,
-    record_key     		TEXT,
-    data           		JSONB NOT NULL,
-    observed_at    		TIMESTAMP,
-    ingested_at    		TIMESTAMP NOT NULL DEFAULT now()
+    unified_row_id           BIGSERIAL PRIMARY KEY,
+    unified_row_uid          VARCHAR(40) UNIQUE NOT NULL,
+    dataset_id               BIGINT NOT NULL REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
+    source_id                BIGINT REFERENCES integration.source(source_id) ON DELETE SET NULL,
+    record_key               TEXT,
+    data                     JSONB NOT NULL,
+    is_excluded              BOOLEAN NOT NULL DEFAULT false,
+    observed_at              TIMESTAMP,
+    ingested_at              TIMESTAMP NOT NULL DEFAULT now()
     );
 
 -- =====================================================================
@@ -192,15 +205,17 @@ CREATE TABLE IF NOT EXISTS integration.metadata (
     );
 
 CREATE TABLE IF NOT EXISTS integration.connection (
-                                                      connection_id 		BIGSERIAL PRIMARY KEY,
-                                                      connection_uid        VARCHAR(40) UNIQUE NOT NULL,
-    source_id     		BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
-    destination_id 		BIGINT     REFERENCES integration.source(source_id) ON DELETE SET NULL,
-    relation      		VARCHAR(60),
-    table_selection              JSONB,
-    created_by    		TEXT,
-    created_at    		TIMESTAMP NOT NULL DEFAULT now()
+    connection_id                  BIGSERIAL PRIMARY KEY,
+    connection_uid                 VARCHAR(40) UNIQUE NOT NULL,
+    dataset_id                     BIGINT     REFERENCES integration.dataset(dataset_id) ON DELETE CASCADE,
+    source_id                      BIGINT NOT NULL REFERENCES integration.source(source_id) ON DELETE CASCADE,
+    destination_id                 BIGINT     REFERENCES integration.source(source_id) ON DELETE SET NULL,
+    relation                       VARCHAR(60),
+    table_selection                JSONB,
+    created_by                     TEXT,
+    created_at                     TIMESTAMP NOT NULL DEFAULT now()
     );
+
 
 
 CREATE TABLE IF NOT EXISTS integration.relationship (
@@ -233,13 +248,25 @@ CREATE INDEX IF NOT EXISTS gin_unified_row_data  ON integration.unified_row USIN
 -- Helpful uniqueness and integrity
 CREATE UNIQUE INDEX IF NOT EXISTS uq_dataset_field_name ON integration.dataset_field(dataset_id, name);
 
-TRUNCATE TABLE integration.dataset CASCADE ;
-TRUNCATE TABLE integration.ingestion_run CASCADE;
-TRUNCATE TABLE integration.raw_event CASCADE;
-TRUNCATE TABLE integration.dataset_field CASCADE;
-TRUNCATE TABLE integration.dataset_mapping CASCADE;
-TRUNCATE TABLE integration.transform_run CASCADE;
-TRUNCATE TABLE integration.unified_row CASCADE;
-TRUNCATE TABLE integration.metadata CASCADE;
-TRUNCATE TABLE integration.connection CASCADE;
-TRUNCATE TABLE integration.relationship CASCADE;
+--     TRUNCATE TABLE integration.dataset CASCADE ;
+--     TRUNCATE TABLE integration.ingestion_run CASCADE;
+--     TRUNCATE TABLE integration.raw_event CASCADE;
+--     TRUNCATE TABLE integration.dataset_field CASCADE;
+--     TRUNCATE TABLE integration.dataset_mapping CASCADE;
+--     TRUNCATE TABLE integration.transform_run CASCADE;
+--     TRUNCATE TABLE integration.unified_row CASCADE;
+--     TRUNCATE TABLE integration.metadata CASCADE;
+--     TRUNCATE TABLE integration.connection CASCADE;
+--     TRUNCATE TABLE integration.relationship CASCADE;
+--     TRUNCATE Table integration.source CASCADE ;
+--
+-- DROP TABLE integration.dataset CASCADE ;
+-- DROP TABLE integration.ingestion_run CASCADE;
+-- DROP TABLE integration.raw_event CASCADE;
+-- DROP TABLE integration.dataset_field CASCADE;
+-- DROP TABLE integration.dataset_mapping CASCADE;
+-- DROP TABLE integration.transform_run CASCADE;
+-- DROP TABLE integration.unified_row CASCADE;
+-- DROP TABLE integration.metadata CASCADE;
+-- DROP TABLE integration.connection CASCADE;
+-- DROP TABLE integration.relationship CASCADE;

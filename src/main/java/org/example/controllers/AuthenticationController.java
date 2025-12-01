@@ -5,6 +5,7 @@ import org.example.models.dto.LoginResponseDTO;
 import org.example.models.dto.RegistrationDTO;
 import org.example.models.entity.ApplicationUser;
 import org.example.service.AuthenticationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 

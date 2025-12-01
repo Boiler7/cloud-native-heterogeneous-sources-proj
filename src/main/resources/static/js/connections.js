@@ -2,6 +2,8 @@ if (!requireAuth()) {
     throw new Error('Not authenticated');
 }
 
+updateWelcomeMessage();
+
 const SOURCES_API_BASE = '/api/sources';
 const CONNECTIONS_API_BASE = '/api/connections';
 const RELATION_OPTIONS = [
@@ -32,31 +34,6 @@ const RELATION_OPTIONS = [
     }
 ];
 
-function decodeJWT(token) {
-    try {
-        const base64Url = token.split('.')[1];
-        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-        }).join(''));
-        return JSON.parse(jsonPayload);
-    } catch (error) {
-        console.error('Error decoding JWT:', error);
-        return null;
-    }
-}
-
-const token = getToken();
-if (token) {
-    const decoded = decodeJWT(token);
-    if (decoded && decoded.sub) {
-        const userEmailElement = document.getElementById('userEmail');
-        if (userEmailElement) {
-            userEmailElement.textContent = decoded.sub;
-        }
-    }
-}
-
 let availableSources = [];
 let availableDestinations = [];
 let currentConnections = [];
@@ -79,6 +56,7 @@ const closeTableSelectionBtn = document.getElementById('closeTableSelection');
 let currentTableSchema = [];
 let pendingConnection = null;
 let schemaCollapseState = {};
+let stageTwoMode = false;
 
 initializeRelationField();
 setupConnectionListeners();
@@ -214,13 +192,49 @@ async function handleCreateConnection(event) {
         return;
     }
 
-    pendingConnection = {
+    const selectedSource = Array.isArray(availableSources)
+        ? availableSources.find((src) => src && (src.id === sourceId || String(src.id) === String(sourceId)))
+        : null;
+
+    const payload = {
         sourceId,
         destinationId: destinationId || null,
         relation: relationValue || 'LOAD'
     };
 
-    openTableSelectionModal();
+    const submitButton = document.querySelector('#connectionForm button[type="submit"]');
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.innerHTML = '<span class="spinner"></span> Saving...';
+    }
+
+    try {
+        const response = await api.post(CONNECTIONS_API_BASE, payload);
+        toast.success('Connection saved');
+
+        const isDbSource = selectedSource && String(selectedSource.type).toUpperCase() === 'DB';
+        if (isDbSource && response && response.id) {
+            pendingConnection = {
+                connectionId: response.id,
+                sourceId,
+                destinationId: destinationId || null,
+                relation: relationValue || 'LOAD',
+                selectedSource
+            };
+            stageTwoMode = true;
+            openTableSelectionModal(selectedSource, true);
+        } else {
+            loadConnections();
+        }
+    } catch (error) {
+        toast.error(error.message || 'Failed to create connection');
+    } finally {
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = 'Start Connection';
+        }
+        document.getElementById('connectionForm').reset();
+    }
 }
 
 async function loadConnections() {
@@ -277,34 +291,48 @@ function renderConnections() {
     `;
 }
 
-function openTableSelectionModal() {
+function openTableSelectionModal(selectedSource, isSecondStage = false) {
     if (!tableSelectionOverlay) {
-        handleConfirmTableSelection();
         return;
     }
     tableSelectionOverlay.classList.remove('hidden');
     currentTableSchema = [];
     schemaCollapseState = {};
     renderTableSelectionLoading();
+    stageTwoMode = Boolean(isSecondStage);
     if (tableSelectionStatus) {
-        tableSelectionStatus.textContent = 'Loading schema...';
+        tableSelectionStatus.textContent = stageTwoMode
+            ? 'Connection established. Pick the tables and columns to ingest next.'
+            : 'Loading schema...';
     }
     if (confirmTableSelectionBtn) {
         confirmTableSelectionBtn.disabled = true;
         confirmTableSelectionBtn.innerHTML = '<span class="spinner"></span>';
     }
     const sourceId = pendingConnection ? pendingConnection.sourceId : null;
-    loadTableSchema(sourceId);
+    loadTableSchema(sourceId, selectedSource);
 }
 
-async function loadTableSchema(sourceId) {
+async function loadTableSchema(sourceId, selectedSource) {
     if (!sourceId) {
         renderTableSelection([]);
         finalizeSchemaLoad();
         return;
     }
     try {
-        const schema = await api.get(`${SOURCES_API_BASE}/${sourceId}/schema`);
+        let schema = [];
+        const source = selectedSource || (Array.isArray(availableSources)
+            ? availableSources.find((item) => item && (item.id === sourceId || String(item.id) === String(sourceId)))
+            : null);
+
+        if (source && String(source.type).toUpperCase() === 'DB') {
+            schema = await api.post(`${SOURCES_API_BASE}/discover-schema`, {
+                type: 'DB',
+                config: source.config || {}
+            });
+        } else {
+            schema = await api.get(`${SOURCES_API_BASE}/${sourceId}/schema`);
+        }
         currentTableSchema = Array.isArray(schema) ? schema : [];
         renderTableSelection(currentTableSchema);
         if (tableSelectionStatus) {
@@ -330,7 +358,7 @@ async function loadTableSchema(sourceId) {
 function finalizeSchemaLoad() {
     if (confirmTableSelectionBtn) {
         confirmTableSelectionBtn.disabled = false;
-        confirmTableSelectionBtn.textContent = 'Start Connection';
+        confirmTableSelectionBtn.textContent = stageTwoMode ? 'Save Selection' : 'Start Connection';
     }
 }
 
@@ -558,18 +586,24 @@ async function handleConfirmTableSelection() {
 
     if (confirmTableSelectionBtn) {
         confirmTableSelectionBtn.disabled = true;
-        confirmTableSelectionBtn.innerHTML = '<span class="spinner"></span> Starting...';
+        confirmTableSelectionBtn.innerHTML = '<span class="spinner"></span> Saving...';
     }
 
     try {
-        await api.post(CONNECTIONS_API_BASE, {
-            sourceId: pendingConnection.sourceId,
-            destinationId: pendingConnection.destinationId,
-            relation: pendingConnection.relation,
-            tableSelections: selections
-        });
-        toast.success('Connection started');
-        document.getElementById('connectionForm').reset();
+        if (pendingConnection.connectionId) {
+            await api.post(`${CONNECTIONS_API_BASE}/${pendingConnection.connectionId}/table-selection`, {
+                tableSelections: selections
+            });
+            toast.success('Table selection saved and ingestion started');
+        } else {
+            await api.post(CONNECTIONS_API_BASE, {
+                sourceId: pendingConnection.sourceId,
+                destinationId: pendingConnection.destinationId,
+                relation: pendingConnection.relation,
+                tableSelections: selections
+            });
+            toast.success('Connection started');
+        }
         closeTableSelectionModal(true);
         loadConnections();
         await maybeDownloadDestinationFile(destinationIdForDownload);
@@ -577,7 +611,7 @@ async function handleConfirmTableSelection() {
         toast.error(error.message || 'Failed to start connection');
         if (confirmTableSelectionBtn) {
             confirmTableSelectionBtn.disabled = false;
-            confirmTableSelectionBtn.textContent = 'Start Connection';
+            confirmTableSelectionBtn.textContent = stageTwoMode ? 'Save Selection' : 'Start Connection';
         }
     }
 }
@@ -588,7 +622,7 @@ function closeTableSelectionModal(resetPending = true) {
     }
     if (confirmTableSelectionBtn) {
         confirmTableSelectionBtn.disabled = false;
-        confirmTableSelectionBtn.textContent = 'Start Connection';
+        confirmTableSelectionBtn.textContent = stageTwoMode ? 'Save Selection' : 'Start Connection';
     }
     if (tableSelectionStatus) {
         tableSelectionStatus.textContent = 'Choose the tables and columns you want to ingest from this source.';
@@ -600,6 +634,7 @@ function closeTableSelectionModal(resetPending = true) {
     if (resetPending) {
         pendingConnection = null;
     }
+    stageTwoMode = false;
 }
 
 function renderConnectionRow(connection) {

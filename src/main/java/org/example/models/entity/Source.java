@@ -3,11 +3,14 @@ package org.example.models.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.example.models.entity.ApplicationUser;
+import org.example.models.entity.Dataset;
 import org.example.models.enums.SourceRole;
 import org.example.models.enums.SourceStatus;
 import org.example.models.enums.SourceType;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.Type;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;

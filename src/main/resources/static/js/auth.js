@@ -21,12 +21,17 @@ function saveToken(token) {
     localStorage.setItem('jwt_token', token);
 }
 
+function saveUserName(name) {
+    localStorage.setItem('user_name', name);
+}
+
 function getToken() {
     return localStorage.getItem('jwt_token');
 }
 
 function clearToken() {
     localStorage.removeItem('jwt_token');
+    localStorage.removeItem('user_name');
 }
 
 function isAuthenticated() {
@@ -38,16 +43,23 @@ if (document.getElementById('registerForm')) {
     document.getElementById('registerForm').addEventListener('submit', async (e) => {
         e.preventDefault();
 
+        const nameField = document.getElementById('registerName') || document.getElementById('name');
         const usernameField = document.getElementById('registerEmail') || document.getElementById('username');
         const passwordField = document.getElementById('registerPassword') || document.getElementById('password');
         const confirmPasswordField = document.getElementById('confirmPassword');
         const messageId = document.getElementById('registerMessage') ? 'registerMessage' : 'message';
 
+        const name = nameField.value.trim();
         const username = usernameField.value.trim();
         const password = passwordField.value;
         const confirmPassword = confirmPasswordField.value;
 
         // Validation
+        if (name.length < 2) {
+            showMessage(messageId, 'Please enter your name', 'error');
+            return;
+        }
+
         if (username.length < 3) {
             showMessage(messageId, 'Email must be at least 3 characters long', 'error');
             return;
@@ -75,7 +87,7 @@ if (document.getElementById('registerForm')) {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ name, username, password })
             });
 
             const data = await response.json();
@@ -145,6 +157,9 @@ if (document.getElementById('loginForm')) {
 
                 if (data.token) {
                     saveToken(data.token);
+                    if (data.name) {
+                        saveUserName(data.name);
+                    }
                     showMessage(messageId, 'Login successful! Redirecting...', 'success');
                     setTimeout(() => {
                         window.location.href = '/dashboard';

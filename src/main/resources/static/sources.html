@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sources - Data Integration Platform</title>
+    <title>Data Integration Platform - Sources</title>
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -12,16 +12,17 @@
             <div class="header-content">
                 <h1>Sources</h1>
                 <div class="user-info">
+                    <a href="/profile" id="welcomeMessage" class="welcome-link">Welcome, User!</a>
                     <button id="logoutBtn" class="btn btn-secondary btn-sm">Logout</button>
                 </div>
             </div>
         </div>
 
         <div class="nav-tabs">
-            <a href="/dashboard" class="nav-tab">🏠 Dashboard</a>
-            <a href="/sources" class="nav-tab active">📁 Sources</a>
-            <a href="/destinations" class="nav-tab">🎯 Destinations</a>
-            <a href="/connections" class="nav-tab">🔗 Connections</a>
+            <a href="/dashboard" class="nav-tab">Dashboard</a>
+            <a href="/sources" class="nav-tab active">Sources</a>
+            <a href="/datasets" class="nav-tab">Datasets</a>
+            <a href="/explore" class="nav-tab">Explore Data</a>
         </div>
 
         <div class="table-container">
@@ -61,7 +62,6 @@
                             <option value="">Select type...</option>
                             <option value="DB">Database</option>
                             <option value="CSV">CSV File</option>
-                            <option value="JSON">JSON File</option>
                         </select>
                     </div>
 
@@ -102,13 +102,14 @@
                                 <span>or click to browse</span>
                             </div>
                         </div>
-                        <input type="file" id="fileInput" accept=".csv,.json" style="display: none;">
+                        <input type="file" id="fileInput" accept=".csv" style="display: none;">
                         <div id="fileName" class="file-name"></div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="additionalConfig">Additional Configuration (JSON)</label>
-                        <textarea id="additionalConfig" rows="4" placeholder='{"dedupeKeys":["id"]}'></textarea>
+                    <div class="form-group" id="csvDelimiterSection" style="display: none;">
+                        <label for="csvDelimiter">CSV Delimiter</label>
+                        <input type="text" id="csvDelimiter" value="," maxlength="5" placeholder=",">
+                        <div class="field-hint">Used only for CSV sources. Default is a comma.</div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -134,6 +135,23 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeStatusModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tableSelectionModal" class="modal-overlay" style="display: none;">
+        <div class="modal table-wizard">
+            <div class="modal-header">
+                <h2>Choose tables for this source</h2>
+                <button class="modal-close" id="closeTableSelection">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="field-hint" id="tableSelectionHint">Loading tables…</p>
+                <div id="tableSelectionList" class="table-wizard-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" type="button" id="skipTableSelection">Skip</button>
+                <button class="btn btn-primary" type="button" id="saveTableSelection">Save selection</button>
             </div>
         </div>
     </div>

@@ -6,6 +6,41 @@ function getToken() {
 
 function clearToken() {
     localStorage.removeItem('jwt_token');
+    localStorage.removeItem('user_name');
+}
+
+function decodeJWT(token) {
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    } catch (error) {
+        console.error('Error decoding JWT:', error);
+        return null;
+    }
+}
+
+function getDisplayName() {
+    const token = getToken();
+    if (!token) {
+        return null;
+    }
+
+    const storedName = localStorage.getItem('user_name');
+    const decoded = decodeJWT(token);
+    return storedName || decoded?.name || decoded?.sub || null;
+}
+
+function updateWelcomeMessage(elementId = 'welcomeMessage') {
+    const displayName = getDisplayName();
+    const welcomeMessage = document.getElementById(elementId);
+
+    if (welcomeMessage && displayName) {
+        welcomeMessage.textContent = `Welcome, ${displayName}!`;
+    }
 }
 
 function handleUnauthorized() {
@@ -94,7 +129,10 @@ const api = {
         body: JSON.stringify(data)
     }),
     
-    delete: (endpoint) => apiRequest(endpoint, { method: 'DELETE' }),
+    delete: (endpoint, data) => apiRequest(endpoint, {
+        method: 'DELETE',
+        body: data ? JSON.stringify(data) : undefined
+    }),
     
     download: async (endpoint) => {
         const token = getToken();
