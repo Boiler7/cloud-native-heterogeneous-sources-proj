@@ -16,6 +16,12 @@ let fieldOrder = [];
 let chartField = '';
 let chartLimit = 5;
 
+function buildDatasetFilename(name) {
+    const base = name && name.trim() ? name.trim() : 'dataset';
+    const safe = base.replace(/[^a-zA-Z0-9-_]+/g, '-');
+    return `${safe}.csv`;
+}
+
 document.getElementById('logoutBtn').addEventListener('click', () => {
     clearToken();
     window.location.href = '/';
@@ -102,7 +108,7 @@ async function loadFilterFields() {
     const filterField = document.getElementById('filterField');
 
     filterField.innerHTML = '<option value="">No filter</option>' +
-        fields.map(field => `<option value="${escapeHtml(field)}">${escapeHtml(getDisplayName(field))}</option>`).join('');
+        fields.map(field => `<option value="${escapeHtml(field)}">${escapeHtml(getFieldDisplayName(field))}</option>`).join('');
 
     document.getElementById('filterContainer').style.display = 'block';
     updateChartFieldOptions(fields);
@@ -163,7 +169,7 @@ function renderTable() {
             <table>
                 <thead>
                     <tr>
-                        ${fields.map(field => `<th>${escapeHtml(getDisplayName(field))}</th>`).join('')}
+                        ${fields.map(field => `<th>${escapeHtml(getFieldDisplayName(field))}</th>`).join('')}
                     </tr>
                 </thead>
                 <tbody>
@@ -243,7 +249,7 @@ function renderChart() {
         data: {
             labels: labels,
             datasets: [{
-                label: `Frequency of ${getDisplayName(chartField)}`,
+                label: `Frequency of ${getFieldDisplayName(chartField)}`,
                 data: values,
                 backgroundColor: 'rgba(79, 70, 229, 0.6)',
                 borderColor: 'rgb(79, 70, 229)',
@@ -272,7 +278,7 @@ function renderChart() {
                 x: {
                     title: {
                         display: true,
-                        text: getDisplayName(chartField)
+                        text: getFieldDisplayName(chartField)
                     }
                 }
             }
@@ -285,7 +291,7 @@ function updateChartFieldOptions(fields) {
     if (!select) return;
 
     select.innerHTML = '<option value="">Select field</option>' +
-        fields.map(field => `<option value="${escapeHtml(field)}">${escapeHtml(getDisplayName(field))}</option>`).join('');
+        fields.map(field => `<option value="${escapeHtml(field)}">${escapeHtml(getFieldDisplayName(field))}</option>`).join('');
 
     const hasExisting = chartField && fields.includes(chartField);
     chartField = hasExisting ? chartField : fields[0] || '';
@@ -320,7 +326,7 @@ function getOrderedFields(rawFields) {
     return ordered;
 }
 
-function getDisplayName(fieldKey) {
+function getFieldDisplayName(fieldKey) {
     if (!fieldKey) return '';
     return fieldDisplayMap[fieldKey] || fieldKey;
 }
@@ -338,15 +344,14 @@ async function exportData() {
     btn.innerHTML = '<span class="spinner"></span> Exporting...';
 
     try {
-        let endpoint = `/data/export?format=csv&dataset=${currentDataset}`;
+        const endpoint = `/api/datasets/${currentDataset}/export/download?format=csv`;
 
         const blob = await api.download(endpoint);
 
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        const fileName = currentDatasetName || 'dataset';
-        a.download = `${fileName}-${new Date().toISOString()}.csv`;
+        a.download = buildDatasetFilename(currentDatasetName);
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
